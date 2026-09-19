@@ -1,0 +1,10 @@
+services:
+  
+
+volumes:
+  db-data:
+
+networks:
+  project-network:
+    driver: bridge
+
