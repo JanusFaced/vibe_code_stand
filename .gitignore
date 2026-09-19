@@ -1,6 +1,7 @@
 __pycache__/
 **/__pycache__/
 ollama-data/
+code-server-config/
 nginx/ssl/
 *.key
 *.crt

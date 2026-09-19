@@ -1,0 +1,23 @@
+name: Local Config
+version: 0.0.1
+schema: v1
+
+models:
+  - name: Qwen 7b Chat
+    provider: ollama
+    model: qwen2.5-coder:7b
+    apiBase: http://ollama:11434
+    roles:
+      - chat
+    defaultCompletionOptions:
+      contextLength: 4096
+
+  - name: Qwen 1.5b Autocomplete
+    provider: ollama
+    model: qwen2.5-coder:1.5b-base
+    apiBase: http://ollama:11434
+    roles:
+      - autocomplete
+    autocompleteOptions:
+      maxPromptTokens: 1024
+      debounceDelay: 350

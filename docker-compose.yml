@@ -22,7 +22,7 @@ services:
       - /dev/dri:/dev/dri
       - /dev/kfd:/dev/kfd
     depends_on:
-      dataBase:
+      data-base:
         condition: service_healthy
     networks:
       - project-network
@@ -37,7 +37,27 @@ services:
       - 8.8.4.4
     restart: unless-stopped
 
-  dataBase:
+  code-server:
+    image: lscr.io/linuxserver/code-server:latest
+    container_name: code-server
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Moscow
+      - PASSWORD=${CODE_SERVER_PASSWORD}
+      - DEFAULT_WORKSPACE=/config/workspace
+    volumes:
+      - ./code-server-config:/config
+      - ./workspace:/config/workspace
+    ports:
+      - "8443:8443"
+    networks:
+      - project-network
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  data-base:
     image: postgres:16.0
     environment:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -46,7 +66,7 @@ services:
     networks:
       - project-network
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - data-base-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 5s
@@ -56,7 +76,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  db-data:
+  data-base-data:
   ollama-data:
     driver: local
   open-webui-data:
