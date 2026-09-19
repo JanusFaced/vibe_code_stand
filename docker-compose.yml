@@ -1,5 +1,42 @@
 services:
 
+  open_web_ui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open_web_ui
+    depends_on:
+      - ollama
+    networks:
+      - project-network
+    ports:
+      - "3000:8080"
+    volumes:
+      - open-webui-data:/app/backend/data
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    depends_on:
+      dataBase:
+        condition: service_healthy
+    networks:
+      - project-network
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=30m
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    restart: unless-stopped
+
   dataBase:
     image: postgres:16.0
     environment:
@@ -10,13 +47,6 @@ services:
       - project-network
     volumes:
       - db-data:/var/lib/postgresql/data
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 256M
-    labels:
-      - "logging=promtail"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 5s
@@ -27,6 +57,10 @@ services:
 
 volumes:
   db-data:
+  ollama-data:
+    driver: local
+  open-webui-data:
+    driver: local
 
 networks:
   project-network:
