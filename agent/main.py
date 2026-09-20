@@ -1,12 +1,8 @@
-"""Точка входа агента."""
-
 import sys
-from config import DEFAULT_TASK
 from loop import run_agent
 
-
 def main():
-    task = " ".join(sys.argv[1:]) or DEFAULT_TASK
+    task = " ".join(sys.argv[1:])
     print(f"Задача: {task}")
     print("=" * 60)
     

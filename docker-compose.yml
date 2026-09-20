@@ -1,20 +1,5 @@
 services:
 
-#  open_web_ui:
-#    image: ghcr.io/open-webui/open-webui:main
-#    container_name: open_web_ui
-#    depends_on:
-#      - ollama
-#    networks:
-#      - project-network
-#    ports:
-#      - "3000:8080"
-#    volumes:
-#      - open-webui-data:/app/backend/data
-#    environment:
-#      - OLLAMA_BASE_URL=http://ollama:11434
-#    restart: unless-stopped
-
   agent:
     build:
       context: ./agent
@@ -24,7 +9,7 @@ services:
       - project-network
     volumes:
       - ./agent:/agent
-      - ./developer_place:/workspace
+      - ./workspace:/workspace
     environment:
       - OLLAMA_HOST=http://ollama:11434
       - WORKING_DIR=/workspace
@@ -36,7 +21,7 @@ services:
     develop:
       watch:
         - action: sync
-          path: ./developer_place
+          path: ./workspace
           target: /workspace
         - action: rebuild
           path: ./agent/Dockerfile
@@ -52,8 +37,6 @@ services:
         condition: service_healthy
     networks:
       - project-network
-    ports:
-      - "11434:11434"
     volumes:
       - ./ollama-data:/root/.ollama
     environment:
@@ -84,8 +67,6 @@ services:
 volumes:
   data-base-data:
   ollama-data:
-    driver: local
-  open-webui-data:
     driver: local
 
 networks:

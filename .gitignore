@@ -3,6 +3,8 @@ __pycache__/
 ollama-data/
 code-server-config/
 nginx/ssl/
+workspace/
+developer_place/
 *.key
 *.crt
 *.pem
