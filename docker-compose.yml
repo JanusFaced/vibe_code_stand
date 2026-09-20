@@ -1,19 +1,45 @@
 services:
 
-  open_web_ui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open_web_ui
-    depends_on:
-      - ollama
+#  open_web_ui:
+#    image: ghcr.io/open-webui/open-webui:main
+#    container_name: open_web_ui
+#    depends_on:
+#      - ollama
+#    networks:
+#      - project-network
+#    ports:
+#      - "3000:8080"
+#    volumes:
+#      - open-webui-data:/app/backend/data
+#    environment:
+#      - OLLAMA_BASE_URL=http://ollama:11434
+#    restart: unless-stopped
+
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    container_name: agent
     networks:
       - project-network
-    ports:
-      - "3000:8080"
     volumes:
-      - open-webui-data:/app/backend/data
+      - ./agent:/agent
+      - ./developer_place:/workspace
     environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_HOST=http://ollama:11434
+      - WORKING_DIR=/workspace
+    depends_on:
+      - ollama
+    working_dir: /agent
+    command: sleep infinity
     restart: unless-stopped
+    develop:
+      watch:
+        - action: sync
+          path: ./developer_place
+          target: /workspace
+        - action: rebuild
+          path: ./agent/Dockerfile
 
   ollama:
     image: ollama/ollama:latest
@@ -35,26 +61,6 @@ services:
     dns:
       - 8.8.8.8
       - 8.8.4.4
-    restart: unless-stopped
-
-  code-server:
-    image: lscr.io/linuxserver/code-server:latest
-    container_name: code-server
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Moscow
-      - PASSWORD=${CODE_SERVER_PASSWORD}
-      - DEFAULT_WORKSPACE=/config/workspace
-    volumes:
-      - ./code-server-config:/config
-      - ./workspace:/config/workspace
-    ports:
-      - "8443:8443"
-    networks:
-      - project-network
-    depends_on:
-      - ollama
     restart: unless-stopped
 
   data-base:
