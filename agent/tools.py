@@ -2,16 +2,10 @@ import os
 import re
 import subprocess
 import time
-from config import WORKSPACE, MAX_FILE_READ_SIZE, PYTHON_TIMEOUT
-
-
-# ============================================================
-# Форматирование через Ruff
-# ============================================================
+from config import WORKSPACE, MAX_FILE_READ_SIZE, MAX_FILE_WRITE_SIZE, PYTHON_TIMEOUT
 
 def format_python(path: str) -> tuple[bool, str]:
     try:
-        # 1. Форматирование (отступы, переносы, кавычки)
         format_result = subprocess.run(
             ["ruff", "format", path],
             capture_output=True, text=True, cwd=WORKSPACE, timeout=30,
@@ -23,25 +17,24 @@ def format_python(path: str) -> tuple[bool, str]:
                 f"Ошибка: {format_result.stderr[:300]}"
             )
         
-        # 2. Автоисправление — но НЕ считаем это провалом
-        # Просто запускаем, чтобы исправить то, что можно
         subprocess.run(
             ["ruff", "check", "--fix", path],
             capture_output=True, text=True, cwd=WORKSPACE, timeout=30,
         )
         
-        # Всё ок — даже если остались предупреждения
         return True, ""
     
     except Exception as e:
         return False, f"❌ Ruff: {e}"
 
-
-# ============================================================
-# Файловые операции
-# ============================================================
-
 def write_file(path: str, content: str) -> str:
+
+    if len(content) > MAX_FILE_WRITE_SIZE:
+        return f"""
+            ❌ Файл {path} не записан! Слишком много кода в один файл!
+            Перепиши компактнее или по разным файлам разложи в отдельные модули!
+        """
+
     full_path = os.path.join(WORKSPACE, path)
     os.makedirs(os.path.dirname(full_path) or WORKSPACE, exist_ok=True)
     with open(full_path, "w", encoding="utf-8") as f:
@@ -54,10 +47,9 @@ def write_file(path: str, content: str) -> str:
                 f"⚠️ Файл {path} записан, но форматирование не удалось:\n\n"
                 f"{message}"
             )
-        return f"✅ Файл {path} создан и отформатирован."
+        return f"✅ Файл {path} создан и отформатирован, теперь запусти и проверь его!"
     
-    return f"✅ Файл {path} создан."
-
+    return f"✅ Файл {path} создан, теперь запусти и проверь его!"
 
 def read_file(path: str) -> str:
     full_path = os.path.join(WORKSPACE, path)
@@ -74,10 +66,9 @@ def read_file(path: str) -> str:
     except Exception as e:
         return f"Ошибка чтения: {e}"
 
-
 def list_files() -> str:
     lines = []
-    IGNORE_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".pytest_cache"}
+    IGNORE_DIRS = {".git", "__pycache__", "node_modules", ".pytest_cache"}
     
     for root, dirs, files in os.walk(WORKSPACE):
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
@@ -118,7 +109,6 @@ def init_uv() -> str:
     except Exception as e:
         return f"Ошибка запуска uv init: {e}"
 
-
 def add_dependency(package: str) -> str:
 
     try:
@@ -136,7 +126,6 @@ def add_dependency(package: str) -> str:
         return f"Ошибка: uv add {package} превысил таймаут (120 секунд)"
     except Exception as e:
         return f"Ошибка запуска uv add: {e}"
-
 
 def list_dependencies() -> str:
     try:
@@ -242,10 +231,14 @@ def run_python(path: str, wait: int = 5) -> str:
             )
     
     if is_alive:
-        verdict = f"✅ Процесс работал {wait} секунд и был остановлен (работает)"
+        verdict = f"""
+            ✅ Процесс работал {wait} секунд и был остановлен (работает).
+            Видимо ты справился с задачей!
+            Проверь вывод если мы получаем ожидаемый результат завершай смело!
+        """
     elif process.returncode == 0:
-        verdict = f"✅ Процесс завершился сам с кодом 0 (работает)"
+        verdict = f"✅ Процесс завершился сам с кодом 0 = значит работает! Если вывод верный завершай смело!"
     else:
         verdict = f"❌ Процесс упал с кодом {process.returncode}"
     
-    return f"{verdict}\n\nВывод:\n{output}"
+    return f"{verdict}\n\nВывод программы, что ты написал:\n{output}"

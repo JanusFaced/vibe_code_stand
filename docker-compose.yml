@@ -1,5 +1,23 @@
 services:
 
+  interface:
+    build:
+      context: ./interface
+      dockerfile: Dockerfile
+    container_name: interface
+    networks:
+      - project-network
+    ports:
+      - "3333:8000"
+    volumes:
+      - ./interface/data:/app/data
+      - ./interface/static:/app/static
+    environment:
+      - AGENT_WS_URL=ws://agent:5000/ws
+    depends_on:
+      - agent
+    restart: unless-stopped
+
   agent:
     build:
       context: ./agent
@@ -13,18 +31,12 @@ services:
     environment:
       - OLLAMA_HOST=http://ollama:11434
       - WORKING_DIR=/workspace
+      - PYTHONUNBUFFERED=1
     depends_on:
       - ollama
     working_dir: /agent
-    command: sleep infinity
+    command: uvicorn server:app --host 0.0.0.0 --port 5000 --ws-ping-interval 60 --ws-ping-timeout 120
     restart: unless-stopped
-    develop:
-      watch:
-        - action: sync
-          path: ./workspace
-          target: /workspace
-        - action: rebuild
-          path: ./agent/Dockerfile
 
   ollama:
     image: ollama/ollama:latest
