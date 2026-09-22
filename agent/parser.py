@@ -1,7 +1,18 @@
+from config import (
+    NUM_PREDICT
+)
 import json
 import re
 
 def extract_json(text: str) -> dict:
+
+    if len(text) > NUM_PREDICT-100:
+        raise ValueError(f"""
+            Твои ответы слишком большие они физически не помешаются в твои NUM_PREDICT.
+            Попробуй разбить свой код на отдельные модули поменьше в отдельные файлы.
+            А потом импортируешь в текущий код, где будешь использовать их функции.
+        """)
+
     text = text.strip()
     
     if "```" in text:
@@ -26,7 +37,6 @@ def extract_json(text: str) -> dict:
         return json.loads(fixed)
     except json.JSONDecodeError as e:
         raise ValueError(f"Не удалось распарсить JSON: {e}\n\nИсходный текст:\n{json_str}")
-
 
 def _escape_newlines_in_strings(s: str) -> str:
 
