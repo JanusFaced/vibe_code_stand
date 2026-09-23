@@ -1,10 +1,13 @@
+from config import (
+	WORKSPACE,
+	WORKPROJECT,
+)
 import asyncio
 import json
 import os
 import signal
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-WORKSPACE = "/workspace"
 AGENT_DIR = "/agent"
 STATE_FILE = "/tmp/agent_state.json"
 
@@ -150,7 +153,7 @@ async def run_project(websocket: WebSocket):
 		})
 		return
 	
-	full_path = os.path.join(WORKSPACE, "main.py")
+	full_path = os.path.join(WORKPROJECT, "main.py")
 	if not os.path.exists(full_path):
 		await websocket.send_json({
 			"type": "error",
@@ -165,7 +168,7 @@ async def run_project(websocket: WebSocket):
 			"uv", "run", "python", "-u", full_path,
 			stdout=asyncio.subprocess.PIPE,
 			stderr=asyncio.subprocess.PIPE,
-			cwd=WORKSPACE,
+			cwd=WORKPROJECT,
 		)
 	except Exception as e:
 		await websocket.send_json({"type": "error", "text": f"Не удалось запустить: {e}"})

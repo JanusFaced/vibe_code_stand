@@ -4,10 +4,14 @@ import subprocess
 import time
 from config import (
     WORKSPACE,
+    WORKPROJECT,
     MAX_FILE_READ_SIZE,
     MAX_FILE_WRITE_SIZE,
     PYTHON_TIMEOUT,
     MAX_SIZE_PROJECT,
+    PROTECTED_FILES,
+    PROTECTED_DIRS,
+    PROTECTED_PACKAGES,
 )
 
 def extract_error_summary(output: str) -> str:
@@ -69,12 +73,15 @@ def execute_action(data: dict) -> tuple[str, str]:
     
     handlers = {
         "write_file": lambda: write_file(data["path"], data["content"]),
+        "rename_file": lambda: rename_file(data["old_path"], data["new_path"]),
+        "delete_file": lambda: delete_file(data["path"]),
         "read_file": lambda: read_file(data["path"]),
         "list_files": lambda: list_files(),
         "init_uv": lambda: init_uv(),
         "add_dependency": lambda: add_dependency(data["package"]),
+        "remove_dependency": lambda: remove_dependency(data["package"]),
         "list_dependencies": lambda: list_dependencies(),
-        "run_python": lambda: run_python(data["path"], wait=data.get("wait", 5),),
+        "run_python": lambda: run_python(wait=data.get("wait", 5),),
         "done": lambda: ("Завершаем!", "Завершаем!", "Завершаем!"),
     }
     
@@ -111,8 +118,8 @@ def write_file(path: str, content: str) -> tuple[str, str, str]:
         """
 
     else:
-        full_path = os.path.join(WORKSPACE, path)
-        os.makedirs(os.path.dirname(full_path) or WORKSPACE, exist_ok=True)
+        full_path = os.path.join(WORKPROJECT, path)
+        os.makedirs(os.path.dirname(full_path) or WORKPROJECT, exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(content)
         
@@ -120,11 +127,97 @@ def write_file(path: str, content: str) -> tuple[str, str, str]:
 
     return history_action, coder_sms, history_sms
 
+def rename_file(old_path: str, new_path: str) -> tuple[str, str, str]:
+
+    history_action = f"Запуск функции rename_file для переименования {old_path} → {new_path}"
+    
+    if not old_path or not new_path:
+        coder_sms = history_sms = "❌ Ошибка: нужно указать old_path и new_path"
+        return history_action, coder_sms, history_sms
+    
+    if old_path == new_path:
+        coder_sms = history_sms = f"❌ Ошибка: old_path и new_path совпадают ({old_path})"
+        return history_action, coder_sms, history_sms
+    
+    old_full = os.path.join(WORKPROJECT, old_path)
+    new_full = os.path.join(WORKPROJECT, new_path)
+    
+    workspace_abs = os.path.abspath(WORKPROJECT)
+    if not os.path.abspath(old_full).startswith(workspace_abs) or \
+       not os.path.abspath(new_full).startswith(workspace_abs):
+        coder_sms = history_sms = "❌ Ошибка: путь выходит за пределы workspace"
+        return history_action, coder_sms, history_sms
+    
+    if not os.path.exists(old_full):
+        coder_sms = history_sms = f"❌ Файл {old_path} не существует"
+        return history_action, coder_sms, history_sms
+    
+    if not os.path.isfile(old_full):
+        coder_sms = history_sms = f"❌ {old_path} — это не файл (возможно, директория)"
+        return history_action, coder_sms, history_sms
+    
+    if os.path.exists(new_full):
+        coder_sms = history_sms = f"❌ Файл {new_path} уже существует. Удали его сначала или выбери другое имя."
+        return history_action, coder_sms, history_sms
+    
+    try:
+        os.makedirs(os.path.dirname(new_full) or WORKPROJECT, exist_ok=True)
+        os.rename(old_full, new_full)
+        coder_sms = f"✅ Файл переименован: {old_path} → {new_path}"
+        history_sms = f"Переименовал {old_path} в {new_path}"
+    except Exception as e:
+        coder_sms = f"❌ Ошибка переименования {old_path} → {new_path}: {e}"
+        history_sms = f"Не смог переименовать {old_path} в {new_path}"
+    
+    return history_action, coder_sms, history_sms
+
+def delete_file(path: str) -> tuple[str, str, str]:
+
+    history_action = f"Запуск функции delete_file для удаления файла {path}"
+    
+    if not path:
+        coder_sms = history_sms = "❌ Ошибка: нужно указать path"
+        return history_action, coder_sms, history_sms
+    
+    if path in PROTECTED_FILES:
+        coder_sms = history_sms = (
+            f"❌ Файл {path} защищён от удаления. "
+            f"Он нужен для работы проекта."
+        )
+        return history_action, coder_sms, history_sms
+    
+    full_path = os.path.join(WORKPROJECT, path)
+    
+    if not os.path.abspath(full_path).startswith(os.path.abspath(WORKPROJECT)):
+        coder_sms = history_sms = "❌ Ошибка: путь выходит за пределы workspace"
+        return history_action, coder_sms, history_sms
+    
+    if not os.path.exists(full_path):
+        coder_sms = history_sms = f"❌ Файл {path} не существует"
+        return history_action, coder_sms, history_sms
+    
+    if not os.path.isfile(full_path):
+        coder_sms = history_sms = (
+            f"❌ {path} — это не файл, а директория. "
+            f"Для удаления папки используй delete_directory (только если пустая)."
+        )
+        return history_action, coder_sms, history_sms
+    
+    try:
+        os.remove(full_path)
+        coder_sms = f"✅ Файл {path} удалён"
+        history_sms = f"Удалил файл {path}"
+    except Exception as e:
+        coder_sms = f"❌ Ошибка удаления {path}: {e}"
+        history_sms = f"Не смог удалить файл {path}"
+    
+    return history_action, coder_sms, history_sms
+
 def read_file(path: str) -> tuple[str, str, str]:
 
     history_action = f"Запуск функции read_file для чтения кода из файла {path}"
 
-    full_path = os.path.join(WORKSPACE, path)
+    full_path = os.path.join(WORKPROJECT, path)
     if not os.path.exists(full_path):
         coder_sms = history_sms = f"Ошибка: файл {path} не найден"
     if os.path.isdir(full_path):
@@ -148,12 +241,11 @@ def list_files() -> tuple[str, str, str]:
     history_action = f"Запуск функции list_files для анализа того что у нас есть в проекте"
 
     lines = []
-    IGNORE_DIRS = {".git", "__pycache__", "node_modules", ".pytest_cache", ".ruff_cache", ".venv"}
 
-    for root, dirs, files in os.walk(WORKSPACE):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+    for root, dirs, files in os.walk(WORKPROJECT):
+        dirs[:] = [d for d in dirs if d not in PROTECTED_DIRS]
         
-        rel_root = os.path.relpath(root, WORKSPACE)
+        rel_root = os.path.relpath(root, WORKPROJECT)
         if rel_root == ".":
             rel_root = ""
         
@@ -238,6 +330,59 @@ def add_dependency(package: str) -> tuple[str, str, str]:
 
     return history_action, coder_sms, history_sms
 
+def remove_dependency(package: str) -> tuple[str, str, str]:
+
+    history_action = f"Запуск функции remove_dependency для удаления зависимости {package} из uv-проекта"
+    
+    if not package:
+        coder_sms = history_sms = "❌ Ошибка: нужно указать package"
+        return history_action, coder_sms, history_sms
+    
+    if package in PROTECTED_PACKAGES:
+        coder_sms = history_sms = (
+            f"❌ Пакет {package} защищён от удаления. "
+            f"Он нужен для работы uv."
+        )
+        return history_action, coder_sms, history_sms
+    
+    try:
+        result = subprocess.run(
+            ["uv", "remove", package],
+            capture_output=True,
+            text=True,
+            cwd=WORKSPACE,
+            timeout=120,
+        )
+        
+        combined = f"{result.stdout} {result.stderr}"
+        
+        if result.returncode == 0:
+            coder_sms = history_sms = f"✅ Пакет '{package}' удалён из проекта"
+        
+        elif "not found" in combined.lower() or "not in dependencies" in combined.lower():
+            coder_sms = history_sms = (
+                f"❌ Пакет '{package}' не найден в прямых зависимостях. "
+                f"Возможно, он пришёл транзитивно (через другой пакет). "
+                f"Его нельзя удалить напрямую."
+            )
+        
+        elif "not installed" in combined.lower():
+            coder_sms = history_sms = f"❌ Пакет '{package}' не установлен в проекте"
+        
+        else:
+            coder_sms = f"Ошибка uv remove {package}:\n{result.stdout}{result.stderr}"
+            history_sms = f"Не получилось удалить зависимость {package} из uv-проекта"
+    
+    except subprocess.TimeoutExpired:
+        coder_sms = f"❌ Ошибка: uv remove {package} превысил таймаут (120 секунд)"
+        history_sms = f"При удалении зависимости {package} ожидание превысило таймаут"
+    
+    except Exception as e:
+        coder_sms = f"Ошибка запуска uv remove: {e}"
+        history_sms = f"Не получилось запустить uv remove"
+    
+    return history_action, coder_sms, history_sms
+
 def list_dependencies() -> tuple[str, str, str]:
 
     history_action = f"Запуск функции list_dependencies для получения списка зависимостей в uv-проекте"
@@ -264,11 +409,12 @@ def list_dependencies() -> tuple[str, str, str]:
 
     return history_action, coder_sms, history_sms
 
-def run_python(path: str, wait: int = 5) -> tuple[str, str, str]:
+def run_python(wait: int = 5) -> tuple[str, str, str]:
+    path = 'main.py'
 
     history_action = f"Запуск функции run_python для запуска файла {path} с временем ожидания исполнения кода {wait} секунд"
 
-    full_path = os.path.join(WORKSPACE, path)
+    full_path = os.path.join(WORKPROJECT, path)
     if not os.path.exists(full_path):
         coder_sms = f"Ошибка: файл {path} не найден"
         history_sms = f"Не нашли файл {path}"
@@ -279,7 +425,7 @@ def run_python(path: str, wait: int = 5) -> tuple[str, str, str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            cwd=WORKSPACE,
+            cwd=WORKPROJECT,
             bufsize=1,
         )
         
@@ -299,49 +445,62 @@ def run_python(path: str, wait: int = 5) -> tuple[str, str, str]:
         
         if not is_alive and process.returncode != 0:
             summary = extract_error_summary(output)
-            coder_sms = f"❌ Процесс упал с кодом {process.returncode}\n{summary}"
-            history_sms = "Процесс упал, неудачный запуск"
+            coder_sms = history_sms = f"❌ Процесс упал с кодом {process.returncode}\nВыжимка по ошибке: {summary}"
 
         else:
             if not output.strip():
                 if is_alive:
                     coder_sms = history_sms = (
                         f"❌ Процесс работал {wait} секунд, но НИЧЕГО не вывел.\n"
+                        "Проверь может ты не дал должного времени ожидания 5, 10, 15 секунд?\n"
+                        "Может быть надо дать 60 секунд ожидания пока посчитается.\n"
                         "Даже если процесс жив — он не сообщает о своей работе.\n"
-                        "Добавь логирование (print) в начале работы и при ключевых событиях."
+                        "Добавь логирование (logging) в начале работы и при ключевых событиях."
                     )
                 
                 elif process.returncode == 0:
                     coder_sms = history_sms = (
                         "❌ Процесс завершился с кодом 0, но НИЧЕГО не вывел.\n"
-                        "Добавь логирование (print), для визуализации работы кода.\n"
+                        "Добавь логирование (logging), для визуализации работы кода.\n"
                         "Если нет блока if __name__ == '__main__': с вызовом функций то добавь их.\n"
-                        "Если код сохраняет файлы/графики и тд. То добавь логирование (print) после кода сохранения."
+                        "Если код сохраняет файлы/графики и тд. То добавь логирование (logging) после кода сохранения."
                     )
                 
                 else:
-                    coder_sms = (
-                        f"❌ Процесс упал с кодом {process.returncode} и без вывода.\n"
-                        "Проверь код на ошибки."
-                    )
-                    history_sms = "Процесс упал, неудачный запуск"
+                    coder_sms = history_sms = f"❌ Процесс упал с кодом {process.returncode} и без вывода. Проверь код на ошибки."
             
+            add_text = (
+                "И вывела какой-то результат. Оцени вывод." if len(output) > 0
+                else "Но ничего не вывела. Проверь не забыл ли ты добавить логирование (logging) в консоль, а не в файл логов и блок if __name__ == '__main__':"
+            )
+
+            output = output if len(output) < MAX_FILE_READ_SIZE else str(output[:MAX_FILE_READ_SIZE]) + " ... (Вывод программы очень длинный!)"
+
             if is_alive:
                 coder_sms = f"""
                     ✅ Процесс работал {wait} секунд и был остановлен.
-                    \n\nВывод программы, что ты написал:\n{output}
+                    \nВывод программы, что ты написал:
+                    \n{output}
+                    \n\n{add_text}
                 """
-                history_sms = f"Программа была удачно запущена"
+                history_sms = f"Программа была удачно запущена. {add_text}"
             
             elif process.returncode == 0:
                 coder_sms = f"""
-                    ✅ Процесс завершился сам с кодом 0!
-                    \n\nВывод программы, что ты написал:\n{output}
+                    ✅ Процесс завершился сам с кодом 0.
+                    \nВывод программы, что ты написал:
+                    \n{output}
+                    \n\n{add_text}
                 """
-                history_sms = f"Программа была удачно запущена"
+                history_sms = f"Программа была удачно запущена. {add_text}"
             
             else:
-                coder_sms = f"❌ Процесс упал с кодом {process.returncode}\n\nВывод программы, что ты написал:\n{output}"
-                history_sms = "Процесс упал, неудачный запуск"
+                coder_sms = f"""
+                    ❌ Процесс упал с кодом {process.returncode}
+                    \nВывод программы, что ты написал:
+                    \n{output}
+                    \n\n{add_text}
+                """
+                history_sms = f"Процесс упал, неудачный запуск. {add_text}"
 
     return history_action, coder_sms, history_sms

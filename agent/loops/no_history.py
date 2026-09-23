@@ -3,16 +3,13 @@ from config import (
     URL_MODEL,
     MAX_STEPS,
     MAX_PARSE_RETRIES,
-    MAX_CONSECUTIVE_FAILURES,
     MAX_FILE_READ_SIZE,
     MAX_ERROR_SIZE,
     MAX_HISTORY_SIZE,
-    TEMPERATURE,
-    TOP_P,
-    TOP_K,
-    REPEAT_PENALTY,
-    NUM_CXT,
-    NUM_PREDICT,
+    tasker_config,
+    coder_config,
+    history_config,
+    PROMPT_TASKER,
     PROMPT_TEMPLATE,
     CONTINUE_PROMPT,
     PROMPT_HISTORY,
@@ -25,40 +22,70 @@ from executor import execute_action
 
 def main() -> None:
 
-    task = sys.argv[1:][0]
-    original_prompt = PROMPT_TEMPLATE.format(task=task)
+    llm_tasker = ChatOllama(
+        model=NAME_MODEL,
+        base_url=URL_MODEL,
+        disable_streaming=True,
+        temperature=tasker_config['TEMPERATURE'],
+        top_p=tasker_config['TOP_P'],
+        top_k=tasker_config['TOP_K'],
+        repeat_penalty=tasker_config['REPEAT_PENALTY'],
+        num_ctx=tasker_config['NUM_CXT'],
+        num_predict=tasker_config['NUM_PREDICT'],
+    )
 
     llm_coder = ChatOllama(
         model=NAME_MODEL,
         base_url=URL_MODEL,
         disable_streaming=True,
         format="json",
-        temperature=TEMPERATURE,
-        top_p=TOP_P,
-        top_k=TOP_K,
-        repeat_penalty=REPEAT_PENALTY,
-        num_ctx=NUM_CXT,
-        num_predict=NUM_PREDICT,
-        stop=["\n\n\n"],
+        temperature=coder_config['TEMPERATURE'],
+        top_p=coder_config['TOP_P'],
+        top_k=coder_config['TOP_K'],
+        repeat_penalty=coder_config['REPEAT_PENALTY'],
+        num_ctx=coder_config['NUM_CXT'],
+        num_predict=coder_config['NUM_PREDICT'],
     )
 
     llm_history = ChatOllama(
         model=NAME_MODEL,
         base_url=URL_MODEL,
         disable_streaming=True,
-        temperature=TEMPERATURE,
-        top_p=TOP_P,
-        top_k=TOP_K,
-        repeat_penalty=REPEAT_PENALTY,
-        num_ctx=NUM_CXT,
-        num_predict=NUM_PREDICT,
-        stop=["\n\n\n"],
+        temperature=history_config['TEMPERATURE'],
+        top_p=history_config['TOP_P'],
+        top_k=history_config['TOP_K'],
+        repeat_penalty=history_config['REPEAT_PENALTY'],
+        num_ctx=history_config['NUM_CXT'],
+        num_predict=history_config['NUM_PREDICT'],
     )
+
+    _, init_uv_result, _, _ = execute_action({"action": "init_uv"})
+    _, list_files, _, _ = execute_action({"action": "list_files"})
+
+    print(f"""
+        \nСОСТОЯНИЕ ПРОЕКТА НАЧАЛО
+        \n{init_uv_result}
+        \n{list_files}
+        \nСОСТОЯНИЕ ПРОЕКТА КОНЕЦ
+    """)
+
+    task = sys.argv[1:][0]
+
+    current_text = PROMPT_TASKER.format(task=task, list=list_files)
+    task = (llm_tasker.invoke(current_text)).content
+
+    print(f"""
+        \nОтвет от таскера:
+        \nНАЧАЛО ЗАДАЧИ
+        \n{task}
+        \nКОНЕЦ ЗАДАЧИ
+    """)
+
+    original_prompt = PROMPT_TEMPLATE.format(task=task, list=list_files)
 
     current_prompt = "" + original_prompt
     text_history = ""
     
-    consecutive_failures = 0
     attempt = 0
     step = 0
 
@@ -97,14 +124,8 @@ def main() -> None:
 
             print(f"Результат действия:\n{result}\n")
             
-            consecutive_failures += 1 if (action == "run_python") and ("Exit code: 1" in result) else 0
-            
             if action == "done":
                 print("Агент завершил работу.")
-                break
-
-            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-                print(f"⚠️ Файл {path} падает {consecutive_failures} раза подряд. Останавливаюсь.")
                 break
 
             if attempt >= MAX_PARSE_RETRIES:
@@ -115,35 +136,37 @@ def main() -> None:
                 print("Достигнуто максимальное количество шагов!")
                 break
 
-            print(f"lenth history = {len(current_prompt)}")
+        print(f"lenth current_prompt = {len(current_prompt)}")
+        print(f"lenth text_history = {len(text_history)}")
 
-            if len(current_prompt) > MAX_HISTORY_SIZE:
-                current_text = PROMPT_HISTORY.format(task=task, history=text_history)
-                content = (llm_history.invoke(current_text)).content
-                print(f"""
-                    \nТекущий ответ от историка:
-                    \nНАЧАЛО ОТВЕТА
-                    \n{content}
-                    \nКОНЕЦ ОТВЕТА
-                """)
+        if len(current_prompt) > MAX_HISTORY_SIZE:
+            current_text = PROMPT_HISTORY.format(history=text_history)
+            content = (llm_history.invoke(current_text)).content
+            print(f"""
+                \nТекущий ответ от историка:
+                \nНАЧАЛО ОТВЕТА
+                \n{content}
+                \nКОНЕЦ ОТВЕТА
+            """)
 
-                current_prompt = f"""
-                    \nИзначальные твои инструкции:
-                    \n{original_prompt}
-                    \n
-                    \nВот что ты уже сделал, это коментарии агента-историка который смотрит на твою работу:
-                    \n{content}
-                    \n
-                    \nВот что ты сделал последний раз:
-                """
+            current_prompt = f"""
+                \nИзначальные твои инструкции:
+                \n{original_prompt}
+                \n
+                \nВот что ты уже сделал, это коментарии агента-историка который смотрит на твою работу:
+                \n{content}
+                \n
+                \nВот что ты сделал последний раз:
+            """
 
-                text_history = f"""
-                    \nПересказанная история уже проведённой тобой разработки:
-                    \n{content}
-                    \n
-                    \nВот что ты сделал последний раз:
-                """
+            text_history = f"""
+                \nПересказанная история уже проведённой тобой разработки:
+                \n{content}
+                \n
+                \nВот что ты сделал последний раз:
+            """
 
+        if data:
             current_prompt += f"""
                 \n - Ты сделал: {json.dumps(data, ensure_ascii=False)}
                 \n - Результат: {result}
@@ -154,4 +177,17 @@ def main() -> None:
             text_history += f"""
                 \n - Ты сделал: {history_action}
                 \n - Результат: {history_sms}
+            """
+
+        else:
+            current_prompt += f"""
+                \n - Ты сделал: Выдал не валидный json
+                \n - Результат: Нет результата
+                \n
+                \n{CONTINUE_PROMPT}
+            """
+
+            text_history += f"""
+                \n - Ты сделал: Выдал не валидный json
+                \n - Результат: Нет результата
             """

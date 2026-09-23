@@ -1,12 +1,10 @@
-from config import (
-    NUM_PREDICT
-)
 import json
 import re
+from config import coder_config
 
 def extract_json(text: str) -> dict:
 
-    if len(text) > NUM_PREDICT-100:
+    if len(text) > coder_config['NUM_PREDICT'] - 100:
         raise ValueError(f"""
             Твои ответы слишком большие они физически не помешаются в твои NUM_PREDICT.
             Попробуй разбить свой код на отдельные модули поменьше в отдельные файлы.
