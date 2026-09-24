@@ -1,193 +1,88 @@
 from config import (
     NAME_MODEL,
     URL_MODEL,
-    MAX_STEPS,
     MAX_PARSE_RETRIES,
-    MAX_FILE_READ_SIZE,
-    MAX_ERROR_SIZE,
-    MAX_HISTORY_SIZE,
-    tasker_config,
-    coder_config,
-    history_config,
-    PROMPT_TASKER,
-    PROMPT_TEMPLATE,
-    CONTINUE_PROMPT,
-    PROMPT_HISTORY,
+    parametrs_config_master,
+    parametrs_coder_master,
+    PROMPT_CONFIG_MASTER,
+    PROMPT_CODER_MASTER,
 )
+from executor import (
+    write_file,
+    read_file,
+    list_files,
+    init_uv,
+    add_dependency,
+    list_dependencies,
+    run_python,
+)
+from parser import (
+    extract_json,
+    parse_project,
+)
+from langchain_ollama import ChatOllama
 import sys
 import json
-from langchain_ollama import ChatOllama
-from parser import extract_json
-from executor import execute_action
 
 def main() -> None:
 
-    llm_tasker = ChatOllama(
-        model=NAME_MODEL,
-        base_url=URL_MODEL,
-        disable_streaming=True,
-        temperature=tasker_config['TEMPERATURE'],
-        top_p=tasker_config['TOP_P'],
-        top_k=tasker_config['TOP_K'],
-        repeat_penalty=tasker_config['REPEAT_PENALTY'],
-        num_ctx=tasker_config['NUM_CXT'],
-        num_predict=tasker_config['NUM_PREDICT'],
-    )
-
-    llm_coder = ChatOllama(
+    llm_config_master = ChatOllama(
         model=NAME_MODEL,
         base_url=URL_MODEL,
         disable_streaming=True,
         format="json",
-        temperature=coder_config['TEMPERATURE'],
-        top_p=coder_config['TOP_P'],
-        top_k=coder_config['TOP_K'],
-        repeat_penalty=coder_config['REPEAT_PENALTY'],
-        num_ctx=coder_config['NUM_CXT'],
-        num_predict=coder_config['NUM_PREDICT'],
+        temperature=parametrs_config_master['TEMPERATURE'],
+        top_p=parametrs_config_master['TOP_P'],
+        top_k=parametrs_config_master['TOP_K'],
+        repeat_penalty=parametrs_config_master['REPEAT_PENALTY'],
+        num_ctx=parametrs_config_master['NUM_CXT'],
+        num_predict=parametrs_config_master['NUM_PREDICT'],
     )
 
-    llm_history = ChatOllama(
+    llm_code_master = ChatOllama(
         model=NAME_MODEL,
         base_url=URL_MODEL,
         disable_streaming=True,
-        temperature=history_config['TEMPERATURE'],
-        top_p=history_config['TOP_P'],
-        top_k=history_config['TOP_K'],
-        repeat_penalty=history_config['REPEAT_PENALTY'],
-        num_ctx=history_config['NUM_CXT'],
-        num_predict=history_config['NUM_PREDICT'],
+        temperature=parametrs_coder_master['TEMPERATURE'],
+        top_p=parametrs_coder_master['TOP_P'],
+        top_k=parametrs_coder_master['TOP_K'],
+        repeat_penalty=parametrs_coder_master['REPEAT_PENALTY'],
+        num_ctx=parametrs_coder_master['NUM_CXT'],
+        num_predict=parametrs_coder_master['NUM_PREDICT'],
     )
 
-    _, init_uv_result, _, _ = execute_action({"action": "init_uv"})
-    _, list_files, _, _ = execute_action({"action": "list_files"})
+    init_uv_result = init_uv()
+    print(init_uv_result)
 
-    print(f"""
-        \nСОСТОЯНИЕ ПРОЕКТА НАЧАЛО
-        \n{init_uv_result}
-        \n{list_files}
-        \nСОСТОЯНИЕ ПРОЕКТА КОНЕЦ
-    """)
-
-    task = sys.argv[1:][0]
-
-    current_text = PROMPT_TASKER.format(task=task, list=list_files)
-    task = (llm_tasker.invoke(current_text)).content
-
-    print(f"""
-        \nОтвет от таскера:
-        \nНАЧАЛО ЗАДАЧИ
-        \n{task}
-        \nКОНЕЦ ЗАДАЧИ
-    """)
-
-    original_prompt = PROMPT_TEMPLATE.format(task=task, list=list_files)
-
-    current_prompt = "" + original_prompt
-    text_history = ""
+    list_project = list_files()
     
-    attempt = 0
-    step = 0
+    list_codes = ""
+    for file_name in list_project:
+        code = read_file(file_name)
+        list_codes += f"""\nФайл {file_name} его код:\n{code}\n"""
 
-    while True:
-        step += 1
-        step_text = f"\nШаг {step}:"
-        print(step_text)
-        current_prompt += step_text
-        text_history += step_text
-        
-        content = (llm_coder.invoke(current_prompt)).content
-        print(f"Ответ модели:\n{content}\n")
-        
-        try:
-            data = extract_json(content)
-            attempt = 0
-        
-        except (ValueError, json.JSONDecodeError) as e:
-            data = False
-            attempt += 1
-            current_text = f"""
-                \n\nТвой ответ не был верным JSON форматом, вот ошибка: {e}
-                \nОтветь ТОЛЬКО валидным JSON, без markdown и пояснений.
-                \nЕсли ты пытаешься выдать большой кусок кода, то ты не сможешь. Дроби на более мелкие файлы для проекта и сохраняй отдельно.
-            """
-            print(current_text)
-            current_prompt += current_text
-            text_history += f"""
-                \nАгент дал кривой ответ, вероятные причины:
-                \n- Слишком длинный ответ, модель физически не способна такой выдать.
-                \n- Просто ошиблась.
-            """
-        
-        if data:
-            history_action, result, history_sms, action = execute_action(data)
+    original_task = sys.argv[1:][0]
 
-            print(f"Результат действия:\n{result}\n")
-            
-            if action == "done":
-                print("Агент завершил работу.")
-                break
+    tasker_prompt = PROMPT_CONFIG_MASTER.format(task=original_task, list_codes=list_codes)
+    response = (llm_config_master.invoke(tasker_prompt)).content
+    print(f"Ответ response:\n{response}\n")
 
-            if attempt >= MAX_PARSE_RETRIES:
-                print(f"Модель не смогла выдать валидный JSON за {MAX_PARSE_RETRIES} попыток")
-                break
+    task_json = extract_json(response)
+    print(f"Ответ task_json:\n{task_json}\n")
+    
+    dependencies = task_json.get("dependencies", [])
+    print(f"Ответ dependencies:\n{dependencies}\n")
+    
+    for name_dep in dependencies:
+        result = add_dependency(name_dep)
+        print(result)
 
-            if step >= MAX_STEPS:
-                print("Достигнуто максимальное количество шагов!")
-                break
+    coder_prompt = PROMPT_CODER_MASTER.format(dependencies=dependencies, task=original_task, list_codes=list_codes)
+    response = (llm_code_master.invoke(coder_prompt)).content
+    files = parse_project(response)
 
-        print(f"lenth current_prompt = {len(current_prompt)}")
-        print(f"lenth text_history = {len(text_history)}")
+    for file_name, python_code in files.items():
+        write_file(file_name, python_code)
+        print(f"✅ {file_name}: {len(python_code)} символов")
 
-        if len(current_prompt) > MAX_HISTORY_SIZE:
-            current_text = PROMPT_HISTORY.format(history=text_history)
-            content = (llm_history.invoke(current_text)).content
-            print(f"""
-                \nТекущий ответ от историка:
-                \nНАЧАЛО ОТВЕТА
-                \n{content}
-                \nКОНЕЦ ОТВЕТА
-            """)
-
-            current_prompt = f"""
-                \nИзначальные твои инструкции:
-                \n{original_prompt}
-                \n
-                \nВот что ты уже сделал, это коментарии агента-историка который смотрит на твою работу:
-                \n{content}
-                \n
-                \nВот что ты сделал последний раз:
-            """
-
-            text_history = f"""
-                \nПересказанная история уже проведённой тобой разработки:
-                \n{content}
-                \n
-                \nВот что ты сделал последний раз:
-            """
-
-        if data:
-            current_prompt += f"""
-                \n - Ты сделал: {json.dumps(data, ensure_ascii=False)}
-                \n - Результат: {result}
-                \n
-                \n{CONTINUE_PROMPT}
-            """
-
-            text_history += f"""
-                \n - Ты сделал: {history_action}
-                \n - Результат: {history_sms}
-            """
-
-        else:
-            current_prompt += f"""
-                \n - Ты сделал: Выдал не валидный json
-                \n - Результат: Нет результата
-                \n
-                \n{CONTINUE_PROMPT}
-            """
-
-            text_history += f"""
-                \n - Ты сделал: Выдал не валидный json
-                \n - Результат: Нет результата
-            """
+    print("Готово!")
