@@ -5,7 +5,14 @@ MAX_FILE_WRITE_SIZE = 5000
 MAX_ERROR_SIZE = 250
 MAX_SIZE_PROJECT = 100
 
-NAME_MODEL = "qwen2.5-coder:7b"
+full_list_models = [
+    "qwen2.5-coder:7b",
+    "qwen3.5:2b",
+    "qwen3.5:4b",
+    "gemma3:4b",
+]
+
+NAME_MODEL = full_list_models[0]
 URL_MODEL = "http://ollama:11434"
 
 parametrs_config_master = {

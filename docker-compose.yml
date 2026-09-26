@@ -46,6 +46,24 @@ services:
     command: uvicorn server:app --host 0.0.0.0 --port 5000
     restart: unless-stopped
 
+#  open-webui:
+#    image: ghcr.io/open-webui/open-webui:main
+#    container_name: open-web-ui
+#    networks:
+#      - project-network
+#    ports:
+#      - "3030:8080"
+#    volumes:
+#      - ./openwebui-data:/app/backend/data
+#    environment:
+#      - OLLAMA_BASE_URL=http://ollama:11434
+#      - WEBUI_AUTH=true
+#    extra_hosts:
+#      - "host.docker.internal:host-gateway"
+#    depends_on:
+#      - ollama
+#    restart: unless-stopped
+
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -86,6 +104,8 @@ services:
 
 volumes:
   data-base-data:
+  openwebui-data:
+    driver: local
   ollama-data:
     driver: local
 

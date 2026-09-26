@@ -1,6 +1,7 @@
 __pycache__/
 **/__pycache__/
 ollama-data/
+openwebui-data/
 code-server-config/
 nginx/ssl/
 workspace/
