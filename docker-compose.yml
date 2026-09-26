@@ -3,17 +3,14 @@ services:
   interface:
     build:
       context: ./interface
+      args:
+        - REACT_APP_API_URL=http://localhost:5000
       dockerfile: Dockerfile
     container_name: interface
     networks:
       - project-network
     ports:
-      - "3333:8000"
-    volumes:
-      - ./interface/data:/app/data
-      - ./interface/static:/app/static
-    environment:
-      - AGENT_WS_URL=ws://agent:5000/ws
+      - "3333:3000"
     depends_on:
       - agent
     restart: unless-stopped
@@ -25,17 +22,28 @@ services:
     container_name: agent
     networks:
       - project-network
+    ports:
+      - "5000:5000"
     volumes:
       - ./agent:/agent
       - ./workspace:/workspace
     environment:
-      - OLLAMA_HOST=http://ollama:11434
-      - WORKING_DIR=/workspace
-      - PYTHONUNBUFFERED=1
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_USER: ${DB_USER}
+      DB_NAME: ${DB_NAME}
+      DB_HOST: data-base
+      DB_PORT: 5432
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@data-base:5432/${DB_NAME}
+      OLLAMA_HOST: http://ollama:11434
+      WORKING_DIR: /workspace
+      PYTHONUNBUFFERED: 1
     depends_on:
-      - ollama
+      data-base:
+        condition: service_healthy
+      ollama:
+        condition: service_started
     working_dir: /agent
-    command: uvicorn server:app --host 0.0.0.0 --port 5000 --ws-ping-interval 60 --ws-ping-timeout 120
+    command: uvicorn server:app --host 0.0.0.0 --port 5000
     restart: unless-stopped
 
   ollama:

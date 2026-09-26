@@ -1,290 +1,270 @@
-from config import (
-	WORKSPACE,
-	WORKPROJECT,
-)
+from config import WORKSPACE, WORKPROJECT
 import asyncio
-import json
+import asyncpg
 import os
 import signal
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 AGENT_DIR = "/agent"
-STATE_FILE = "/tmp/agent_state.json"
+DATABASE_URL = os.getenv("DATABASE_URL")
+SESSION_ID = "default"
 
-app = FastAPI()
-
-running_processes: dict[str, asyncio.subprocess.Process] = {}
-
-def save_pid(name: str, pid: int) -> None:
-	state = {}
-	if os.path.exists(STATE_FILE):
-		with open(STATE_FILE, "r") as f:
-			state = json.load(f)
-	state[name] = pid
-	with open(STATE_FILE, "w") as f:
-		json.dump(state, f)
+running: dict[str, asyncio.subprocess.Process] = {}
+pool: asyncpg.Pool | None = None
 
 
-def clear_pid(name: str) -> None:
-	if not os.path.exists(STATE_FILE):
-		return
-	with open(STATE_FILE, "r") as f:
-		state = json.load(f)
-	state.pop(name, None)
-	with open(STATE_FILE, "w") as f:
-		json.dump(state, f)
+async def init_db():
+    async with pool.acquire() as c:
+        await c.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id BIGSERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
 
 
-def get_pid(name: str) -> int | None:
-	if not os.path.exists(STATE_FILE):
-		return None
-	with open(STATE_FILE, "r") as f:
-		state = json.load(f)
-	return state.get(name)
+async def save_message(role: str, content: str):
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)",
+            SESSION_ID, role, content,
+        )
 
 
-def is_process_alive(pid: int) -> bool:
-	try:
-		os.kill(pid, 0)
-		return True
-	except (OSError, ProcessLookupError):
-		return False
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-	await websocket.accept()
-	
-	await websocket.send_json({
-		"type": "status_report",
-		"running": list(running_processes.keys()),
-	})
-	
-	try:
-		while True:
-			data = await websocket.receive_json()
-			await handle_command(websocket, data)
-	except WebSocketDisconnect:
-		pass
-	except Exception as e:
-		try:
-			await websocket.send_json({"type": "error", "text": f"Ошибка сервера: {e}"})
-		except Exception:
-			pass
+async def get_messages(after: int = 0) -> list[dict]:
+    async with pool.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT id, role, content, created_at
+            FROM messages
+            WHERE session_id = $1 AND id > $2
+            ORDER BY id
+            """,
+            SESSION_ID, after,
+        )
+    return [
+        {"id": r["id"], "role": r["role"], "content": r["content"],
+         "timestamp": r["created_at"].isoformat()}
+        for r in rows
+    ]
 
 
-async def handle_command(websocket: WebSocket, data: dict):
-
-	cmd = data.get("type")
-	
-	if cmd == "task":
-		task = data.get("text", "").strip()
-		if not task:
-			await websocket.send_json({"type": "error", "text": "Пустая задача"})
-			return
-		await run_vibecoding(websocket, task)
-	
-	elif cmd == "start":
-		await run_project(websocket)
-	
-	elif cmd == "stop":
-		target = data.get("target", "project")
-		await stop_process(websocket, target)
-	
-	elif cmd == "status":
-		await send_status(websocket)
-	
-	else:
-		await websocket.send_json({"type": "error", "text": f"Неизвестная команда: {cmd}"})
+async def clear_history():
+    async with pool.acquire() as c:
+        await c.execute("DELETE FROM messages WHERE session_id = $1", SESSION_ID)
 
 
-async def send_status(websocket: WebSocket):
-	status = {
-		"type": "status_report",
-		"running": list(running_processes.keys()),
-	}
-	await websocket.send_json(status)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global pool
+    for _ in range(10):
+        try:
+            pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+            break
+        except Exception:
+            await asyncio.sleep(1)
+    else:
+        raise RuntimeError("Не удалось подключиться к БД")
 
-async def run_vibecoding(websocket: WebSocket, task: str):
+    await init_db()
+    yield
 
-	if "vibecoding" in running_processes:
-		await websocket.send_json({
-			"type": "error",
-			"text": "Вайб-кодинг уже запущен. Останови через /stop vibecoding"
-		})
-		return
-	
-	await websocket.send_json({
-		"type": "status",
-		"text": f"🚀 Запуск вайб-кодинга: {task}"
-	})
-	
-	full_path = os.path.join(AGENT_DIR, "main.py")
-	
-	try:
-		process = await asyncio.create_subprocess_exec(
-			"python", "-u", full_path, task,
-			stdout=asyncio.subprocess.PIPE,
-			stderr=asyncio.subprocess.PIPE,
-			cwd=AGENT_DIR,
-		)
-	except Exception as e:
-		await websocket.send_json({"type": "error", "text": f"Не удалось запустить: {e}"})
-		return
-	
-	save_pid("vibecoding", process.pid)
-	running_processes["vibecoding"] = process
-	
-	await stream_process(websocket, process, "vibecoding")
-	
-	running_processes.pop("vibecoding", None)
-	clear_pid("vibecoding")
-	
-	await websocket.send_json({
-		"type": "done",
-		"target": "vibecoding",
-		"code": process.returncode
-	})
+    # гасим все процессы при выходе
+    for name in list(running.keys()):
+        try:
+            await _kill_process(name)
+        except Exception:
+            pass
 
-async def run_project(websocket: WebSocket):
-	if "project" in running_processes:
-		await websocket.send_json({
-			"type": "error",
-			"text": "Проект уже запущен. Останови через /stop project"
-		})
-		return
-	
-	full_path = os.path.join(WORKPROJECT, "main.py")
-	if not os.path.exists(full_path):
-		await websocket.send_json({
-			"type": "error",
-			"text": f"Файл {full_path} не найден"
-		})
-		return
-	
-	await websocket.send_json({"type": "status", "text": "🚀 Запуск проекта..."})
-	
-	try:
-		process = await asyncio.create_subprocess_exec(
-			"uv", "run", "python", "-u", full_path,
-			stdout=asyncio.subprocess.PIPE,
-			stderr=asyncio.subprocess.PIPE,
-			cwd=WORKPROJECT,
-		)
-	except Exception as e:
-		await websocket.send_json({"type": "error", "text": f"Не удалось запустить: {e}"})
-		return
-	
-	save_pid("project", process.pid)
-	running_processes["project"] = process
-	
-	await stream_process(websocket, process, "project")
-	
-	running_processes.pop("project", None)
-	clear_pid("project")
-	
-	await websocket.send_json({
-		"type": "done",
-		"target": "project",
-		"code": process.returncode
-	})
-
-async def stream_process(websocket: WebSocket, process, name: str):
-	"""Читает stdout/stderr процесса и шлёт в WebSocket."""
-	
-	async def read_stream(stream):
-		while True:
-			line = await stream.readline()
-			if not line:
-				break
-			text = line.decode("utf-8", errors="replace").rstrip()
-			if text:
-				try:
-					await websocket.send_json({"type": "output", "text": text})
-				except Exception:
-					return
-	
-	# Heartbeat: каждые 30 секунд отправляем ping
-	async def heartbeat():
-		while process.returncode is None:
-			await asyncio.sleep(30)
-			try:
-				await websocket.send_json({"type": "heartbeat"})
-			except Exception:
-				return
-	
-	heartbeat_task = asyncio.create_task(heartbeat())
-	
-	try:
-		await asyncio.gather(
-			read_stream(process.stdout),
-			read_stream(process.stderr),
-		)
-		await process.wait()
-	finally:
-		heartbeat_task.cancel()
-
-async def stop_process(websocket: WebSocket, name: str):
-
-	if name not in running_processes:
-		await websocket.send_json({
-			"type": "error",
-			"text": f"Процесс '{name}' не запущен"
-		})
-		return
-	
-	process = running_processes[name]
-	await websocket.send_json({
-		"type": "status",
-		"text": f"⏹️ Останавливаю '{name}' (PID: {process.pid})..."
-	})
-	
-	try:
-		process.terminate()
-		try:
-			await asyncio.wait_for(process.wait(), timeout=5.0)
-		except asyncio.TimeoutError:
-			process.kill()
-			await process.wait()
-		
-		running_processes.pop(name, None)
-		clear_pid(name)
-		
-		await websocket.send_json({
-			"type": "status",
-			"text": f"✅ Процесс '{name}' остановлен"
-		})
-	except Exception as e:
-		await websocket.send_json({"type": "error", "text": f"Ошибка остановки: {e}"})
+    await pool.close()
 
 
-async def stop_all_processes(websocket: WebSocket | None = None, notify: bool = True):
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3333", "http://127.0.0.1:3333"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-	for name, process in list(running_processes.items()):
-		try:
-			process.terminate()
-			try:
-				await asyncio.wait_for(process.wait(), timeout=3.0)
-			except asyncio.TimeoutError:
-				process.kill()
-				await process.wait()
-		except Exception:
-			pass
-		
-		running_processes.pop(name, None)
-		clear_pid(name)
-		
-		if notify and websocket:
-			try:
-				await websocket.send_json({
-					"type": "status",
-					"text": f"⏹️ Остановлен {name}"
-				})
-			except Exception:
-				pass
+
+# ───────── Убийство процесса ─────────
+async def _kill_process(name: str):
+    """Убивает процесс и всю его группу (важно для `uv run`)."""
+    p = running.get(name)
+    if not p:
+        return
+
+    # шлём SIGTERM всей группе процессов (start_new_session=True на старте)
+    try:
+        os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+    try:
+        await asyncio.wait_for(p.wait(), timeout=5)
+    except asyncio.TimeoutError:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await p.wait()
+
+    running.pop(name, None)
+
+
+async def stream(process: asyncio.subprocess.Process, name: str):
+    async def read(stream_):
+        while True:
+            line = await stream_.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                await save_message("agent", text)
+
+    await asyncio.gather(read(process.stdout), read(process.stderr))
+    await process.wait()
+
+    running.pop(name, None)
+    await save_message("system", f"Процесс {name} завершён (код {process.returncode})")
+
+
+# ───────── Запуск агента (vibecoding) ─────────
+async def run_vibecoding(task: str):
+    if "vibecoding" in running:
+        await save_message("error", "Вайб-кодинг уже запущен. Останови: /stop vibecoding")
+        return
+
+    await save_message("system", f"🚀 Запуск вайб-кодинга: {task}")
+
+    try:
+        p = await asyncio.create_subprocess_exec(
+            "python", "-u", os.path.join(AGENT_DIR, "main.py"), task,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=AGENT_DIR,
+            start_new_session=True,      # ← важно для killpg
+        )
+    except Exception as e:
+        await save_message("error", f"Не удалось запустить: {e}")
+        return
+
+    running["vibecoding"] = p
+    await stream(p, "vibecoding")
+
+
+# ───────── Запуск проекта ─────────
+async def run_project():
+    if "project" in running:
+        await save_message("error", "Проект уже запущен. Останови: /stop project")
+        return
+
+    path = os.path.join(WORKPROJECT, "main.py")
+    if not os.path.exists(path):
+        await save_message("error", f"Файл {path} не найден")
+        return
+
+    await save_message("system", f"🚀 Запуск проекта: {path}")
+
+    try:
+        p = await asyncio.create_subprocess_exec(
+            "uv", "run", "python", "-u", path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=WORKPROJECT,
+            start_new_session=True,      # ← важно для killpg
+        )
+    except Exception as e:
+        await save_message("error", f"Не удалось запустить: {e}")
+        return
+
+    running["project"] = p
+    await stream(p, "project")
+
+
+# ───────── Остановка ─────────
+async def stop_process(name: str):
+    if name not in running:
+        await save_message("error", f"Процесс '{name}' не запущен")
+        return
+
+    p = running[name]
+    await save_message("system", f"⏹️ Останавливаю '{name}' (PID {p.pid})...")
+
+    await _kill_process(name)
+
+    await save_message("system", f"✅ Процесс '{name}' остановлен")
+
+
+# ───────── API ─────────
+class CommandIn(BaseModel):
+    text: str
+
+
+@app.post("/api/command")
+async def api_command(cmd: CommandIn):
+    text = cmd.text.strip()
+    if not text:
+        raise HTTPException(400, "Пустое сообщение")
+
+    await save_message("user", text)
+
+    parts = text.split(maxsplit=1)
+    command = parts[0]
+    args = parts[1].strip() if len(parts) > 1 else ""
+
+    if command == "/clear":
+        await clear_history()
+
+    elif command == "/task":
+        if not args:
+            raise HTTPException(400, "Пустая задача. Используй: /task <текст>")
+        asyncio.create_task(run_vibecoding(args))
+
+    elif command == "/start":
+        asyncio.create_task(run_project())
+
+    elif command == "/stop":
+        if args == "project":
+            await stop_process("project")
+        elif args == "vibecoding":
+            await stop_process("vibecoding")
+        else:
+            raise HTTPException(
+                400,
+                "Укажи что остановить: /stop project или /stop vibecoding",
+            )
+
+    elif command == "/status":
+        running_list = list(running.keys())
+        await save_message(
+            "system",
+            f"running: {running_list if running_list else 'пусто'}",
+        )
+
+    else:
+        raise HTTPException(400, f"Неизвестная команда: {command}")
+
+    return {"ok": True}
+
+
+@app.get("/api/messages")
+async def api_messages(after: int = 0):
+    return {"messages": await get_messages(after)}
+
+
+@app.get("/api/status")
+async def api_status():
+    return {"running": list(running.keys())}
+
 
 @app.get("/health")
 async def health():
-	return {"status": "ok", "running": list(running_processes.keys())}
-
-
-
+    return {"status": "ok", "running": list(running.keys())}
