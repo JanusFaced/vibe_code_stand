@@ -4,7 +4,7 @@ ollama-data/
 openwebui-data/
 code-server-config/
 nginx/ssl/
-workspace/
+workplace/
 developer_place/
 *.key
 *.crt

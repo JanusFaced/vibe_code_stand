@@ -26,16 +26,16 @@ services:
       - "5000:5000"
     volumes:
       - ./agent:/agent
-      - ./workspace:/workspace
+      - ./workplace:/workplace
     environment:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_USER: ${DB_USER}
       DB_NAME: ${DB_NAME}
       DB_HOST: data-base
       DB_PORT: 5432
+      WORKFOLDER: workspace
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@data-base:5432/${DB_NAME}
       OLLAMA_HOST: http://ollama:11434
-      WORKING_DIR: /workspace
       PYTHONUNBUFFERED: 1
     depends_on:
       data-base:

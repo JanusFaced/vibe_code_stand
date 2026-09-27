@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
     HeroSection,
     Container,
-    Title,
     AuthorTagline,
     ChatWindow,
     MessageGroup,
@@ -120,8 +119,7 @@ export default function MainPageApp() {
     return (
         <HeroSection>
             <Container>
-                <Title>AI Agent</Title>
-                <AuthorTagline>vibe-coding console</AuthorTagline>
+                <AuthorTagline>AI Agent: [ vibe-coding console ]</AuthorTagline>
 
                 <StatusBar>
                     <StatusDot $online={connected} />
@@ -131,26 +129,29 @@ export default function MainPageApp() {
 
                 <ControlBar>
                     <ControlButton onClick={() => handleControl("/start")}>
-                        ▶ start project
+                        ▶️ start project
                     </ControlButton>
                     <ControlButton onClick={() => handleControl("/stop project")}>
-                        ⏹ stop project
+                        🛑 stop project
                     </ControlButton>
                     <ControlButton onClick={() => handleControl("/stop vibecoding")}>
-                        ⏹ stop vibecoding
+                        🛑 stop vibecoding
                     </ControlButton>
                     <ControlButton onClick={() => handleControl("/status")}>
-                        ● status
+                        🔍 status
+                    </ControlButton>
+                    <ControlButton onClick={() => handleControl("/projects")}>
+                        📜 projects
                     </ControlButton>
                     <ControlButton onClick={() => handleControl("/clear")}>
-                        ⌫ clear
+                        ♻️ clear
                     </ControlButton>
                 </ControlBar>
 
                 <ChatWindow ref={chatRef}>
                     {grouped.length === 0 && (
                         <MessageLine style={{ color: "#64748b" }}>
-                            Введи /task для запуска агента, /start для запуска проекта.
+                            Введи /task для запуска агента, /switch для переключения проекта.
                         </MessageLine>
                     )}
 
@@ -172,7 +173,7 @@ export default function MainPageApp() {
                     <Input
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="/task текст задачи | /start | /stop project | /stop vibecoding | /status | /clear"
+                        placeholder="/task задача | /switch папка"
                     />
                     <SendButton type="submit">→</SendButton>
                 </InputBar>

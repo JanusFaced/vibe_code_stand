@@ -1,7 +1,6 @@
 from config import (
     NAME_MODEL,
     URL_MODEL,
-    MAX_PARSE_RETRIES,
     parametrs_config_master,
     parametrs_coder_master,
     PROMPT_CONFIG_MASTER,
@@ -16,40 +15,38 @@ from executor import (
     list_dependencies,
     run_python,
 )
-from parser import (
-    extract_json,
-    parse_project,
-)
-from langchain_ollama import ChatOllama
+from parser import extract_json
+from ollama import Client
 import sys
 import json
 
+filename = "main.py"
+
+client = Client(host=URL_MODEL)
+
+def call_ollama(
+        prompt: str,
+        params: dict,
+    ) -> str:
+
+    response = client.chat(
+        model=NAME_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        think=False,
+        options={
+            "temperature": params['TEMPERATURE'],
+            "top_p": params['TOP_P'],
+            "top_k": params['TOP_K'],
+            "repeat_penalty": params['REPEAT_PENALTY'],
+            "num_ctx": params['NUM_CXT'],
+            "num_predict": params['NUM_PREDICT'],
+        },
+        stream=False,
+    )
+
+    return response.message.content
+
 def main() -> None:
-
-    llm_config_master = ChatOllama(
-        model=NAME_MODEL,
-        base_url=URL_MODEL,
-        disable_streaming=True,
-        format="json",
-        temperature=parametrs_config_master['TEMPERATURE'],
-        top_p=parametrs_config_master['TOP_P'],
-        top_k=parametrs_config_master['TOP_K'],
-        repeat_penalty=parametrs_config_master['REPEAT_PENALTY'],
-        num_ctx=parametrs_config_master['NUM_CXT'],
-        num_predict=parametrs_config_master['NUM_PREDICT'],
-    )
-
-    llm_code_master = ChatOllama(
-        model=NAME_MODEL,
-        base_url=URL_MODEL,
-        disable_streaming=True,
-        temperature=parametrs_coder_master['TEMPERATURE'],
-        top_p=parametrs_coder_master['TOP_P'],
-        top_k=parametrs_coder_master['TOP_K'],
-        repeat_penalty=parametrs_coder_master['REPEAT_PENALTY'],
-        num_ctx=parametrs_coder_master['NUM_CXT'],
-        num_predict=parametrs_coder_master['NUM_PREDICT'],
-    )
 
     init_uv_result = init_uv()
     print(init_uv_result)
@@ -63,26 +60,35 @@ def main() -> None:
 
     original_task = sys.argv[1:][0]
 
-    tasker_prompt = PROMPT_CONFIG_MASTER.format(task=original_task, list_codes=list_codes)
-    response = (llm_config_master.invoke(tasker_prompt)).content
-    print(f"Ответ response:\n{response}\n")
+    tasker_prompt = PROMPT_CONFIG_MASTER.format(
+        task=original_task,
+        list_codes=list_codes
+    )
 
+    response = call_ollama(
+        prompt=tasker_prompt,
+        params=parametrs_config_master,
+    )
     task_json = extract_json(response)
-    print(f"Ответ task_json:\n{task_json}\n")
     
     dependencies = task_json.get("dependencies", [])
-    print(f"Ответ dependencies:\n{dependencies}\n")
+    print(f"Зависимости, что нужно добавить:\n{dependencies}\n")
     
     for name_dep in dependencies:
         result = add_dependency(name_dep)
         print(result)
 
-    coder_prompt = PROMPT_CODER_MASTER.format(dependencies=dependencies, task=original_task, list_codes=list_codes)
-    response = (llm_code_master.invoke(coder_prompt)).content
-    files = parse_project(response)
+    coder_prompt = PROMPT_CODER_MASTER.format(
+        dependencies=dependencies,
+        task=original_task,
+        filename=filename,
+        list_codes=list_codes
+    )
 
-    for file_name, python_code in files.items():
-        write_file(file_name, python_code)
-        print(f"✅ {file_name}: {len(python_code)} символов")
+    python_code = call_ollama(
+        prompt=coder_prompt,
+        params=parametrs_coder_master,
+    )
 
+    write_file(filename, python_code)
     print("Готово!")

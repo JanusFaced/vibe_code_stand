@@ -1,15 +1,12 @@
-from config import (
-    WORKSPACE,
-    WORKPROJECT,
-    MAX_FILE_READ_SIZE,
-    MAX_FILE_WRITE_SIZE,
-    MAX_SIZE_PROJECT,
-    PROTECTED_DIRS,
-)
+from config import MAX_FILE_READ_SIZE, MAX_FILE_WRITE_SIZE, PROTECTED_DIRS
 import subprocess
 import os
 import re
 import time
+
+WORKFOLDER = os.getenv("WORKFOLDER")
+WORKSPACE = f"/workplace/{WORKFOLDER}"
+WORKPROJECT = f"{WORKSPACE}/src/"
 
 def extract_error_summary(output: str) -> str:
 
@@ -43,7 +40,7 @@ def extract_error_summary(output: str) -> str:
     workspace_code = None
     
     for i, line in enumerate(lines):
-        m = re.match(r'\s*File "(/workspace/[^"]+)", line (\d+), in (.+)', line)
+        m = re.match(r'\s*File "(/workplace/[^"]+)", line (\d+), in (.+)', line)
         if not m:
             continue
         path = m.group(1)
@@ -124,9 +121,10 @@ def list_dependencies() -> str:
             cwd=WORKSPACE,
             timeout=30,
         )
-        
+
         if result.returncode == 0:
-            coder_sms = f"Зависимости проекта:\n{result.stdout}"
+            out_data = '\n'.join(((result.stdout).split('\n'))[2:-2])
+            coder_sms = f"{out_data}"
         
         else:
             coder_sms = f"Ошибка uv pip list:\n{result.stdout}{result.stderr}"

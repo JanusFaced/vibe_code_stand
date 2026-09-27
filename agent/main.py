@@ -1,6 +1,4 @@
-from loops import (
-    no_history,
-)
+from loops import no_history
 
 def run_vibecoding() -> None:
     variant = 'no_history'

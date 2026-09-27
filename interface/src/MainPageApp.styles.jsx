@@ -49,16 +49,6 @@ export const Container = styled.div`
     text-align: center;
 `;
 
-export const Title = styled.h1`
-    margin: 0 0 0.5rem;
-    color: #f8fafc;
-    font-size: clamp(2rem, 5vw, 3rem);
-    font-weight: 750;
-    letter-spacing: -0.04em;
-    text-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
-    animation: ${fadeInUp} 0.6s ease both;
-`;
-
 export const AuthorTagline = styled.p`
     margin: 0 0 1.5rem;
     color: #60a5fa;

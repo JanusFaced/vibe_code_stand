@@ -1,14 +1,13 @@
-from config import WORKSPACE, WORKPROJECT
 import asyncio
 import asyncpg
 import os
+from pathlib import Path
 import signal
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-AGENT_DIR = "/agent"
 DATABASE_URL = os.getenv("DATABASE_URL")
 SESSION_ID = "default"
 
@@ -54,11 +53,30 @@ async def get_messages(after: int = 0) -> list[dict]:
         for r in rows
     ]
 
-
 async def clear_history():
     async with pool.acquire() as c:
         await c.execute("DELETE FROM messages WHERE session_id = $1", SESSION_ID)
 
+async def switch_folder(folder):
+    path = "/workplace"
+    os.environ["WORKFOLDER"] = folder
+    projects = [name for name in os.listdir(path) if os.path.isdir(os.path.join(path, name))]
+
+    if folder in projects:
+        await save_message("system", f"Рабочая папка переключена на -> {folder}")
+
+    else:
+        new_path = f"{path}/{folder}/"
+        Path(new_path).mkdir(parents=True, exist_ok=True)
+        await save_message("system", f"Новый проект {folder} был создан! Рабочая папка переключена на -> {folder}")
+
+async def print_list_of_projects():
+    path = "/workplace"
+    current = os.environ["WORKFOLDER"]
+    projects = [f"{name} <- текущий проект" if name == current else name for name in os.listdir(path) if os.path.isdir(os.path.join(path, name))]
+
+    projects_str = "Список всех проектов:\n" + "\n".join(projects)
+    await save_message("system", projects_str)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -138,6 +156,8 @@ async def stream(process: asyncio.subprocess.Process, name: str):
 
 # ───────── Запуск агента (vibecoding) ─────────
 async def run_vibecoding(task: str):
+    AGENT_DIR = "/agent"
+
     if "vibecoding" in running:
         await save_message("error", "Вайб-кодинг уже запущен. Останови: /stop vibecoding")
         return
@@ -162,6 +182,10 @@ async def run_vibecoding(task: str):
 
 # ───────── Запуск проекта ─────────
 async def run_project():
+
+    WORKFOLDER = os.getenv("WORKFOLDER")
+    WORKPROJECT = f"/workplace/{WORKFOLDER}/src/"
+
     if "project" in running:
         await save_message("error", "Проект уже запущен. Останови: /stop project")
         return
@@ -179,7 +203,7 @@ async def run_project():
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=WORKPROJECT,
-            start_new_session=True,      # ← важно для killpg
+            start_new_session=True,
         )
     except Exception as e:
         await save_message("error", f"Не удалось запустить: {e}")
@@ -222,6 +246,15 @@ async def api_command(cmd: CommandIn):
 
     if command == "/clear":
         await clear_history()
+
+    elif command == "/switch":
+        if not args:
+            raise HTTPException(400, "Пустое название папки. Используй: /switch <текст>")
+        else:
+            await switch_folder(args)
+
+    elif command == "/projects":
+        await print_list_of_projects()
 
     elif command == "/task":
         if not args:
