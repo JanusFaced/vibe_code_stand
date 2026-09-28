@@ -8,85 +8,6 @@ WORKFOLDER = os.getenv("WORKFOLDER")
 WORKSPACE = f"/workplace/{WORKFOLDER}"
 WORKPROJECT = f"{WORKSPACE}/src/"
 
-def extract_error_summary(output: str) -> str:
-
-    MAX_ERROR_LINE = 300
-    MAX_SUMMARY_LINES = 5
-
-    lines = output.split("\n")
-    
-    error_line = None
-    for line in reversed(lines):
-        stripped = line.strip()
-        if re.match(r"^[A-Z][a-zA-Z]*(Error|Exception):", stripped):
-            error_line = stripped
-            break
-    
-    if not error_line:
-        for line in reversed(lines):
-            stripped = line.strip()
-            if any(kw in stripped for kw in ["Error", "FAIL", "Failed", "exit code 1", "❌"]):
-                error_line = stripped
-                break
-    
-    if not error_line:
-        return "\n".join(lines[-MAX_SUMMARY_LINES:])
-    
-    if len(error_line) > MAX_ERROR_LINE:
-        error_line = error_line[:MAX_ERROR_LINE] + "..."
-    
-    workspace_file = None
-    workspace_line = None
-    workspace_code = None
-    
-    for i, line in enumerate(lines):
-        m = re.match(r'\s*File "(/workplace/[^"]+)", line (\d+), in (.+)', line)
-        if not m:
-            continue
-        path = m.group(1)
-        if ".venv" in path or "site-packages" in path:
-            continue
-        workspace_file = path
-        workspace_line = m.group(2)
-        if i + 1 < len(lines):
-            workspace_code = lines[i + 1].strip()
-            if len(workspace_code) > MAX_ERROR_LINE:
-                workspace_code = workspace_code[:MAX_ERROR_LINE] + "..."
-        break
-    
-    parts = [f"❌ {error_line}"]
-    if workspace_file:
-        parts.append(f"📍 Файл: {workspace_file}, строка {workspace_line}")
-    if workspace_code:
-        parts.append(f"💻 Код: {workspace_code}")
-    
-    return "\n".join(parts)
-
-def init_uv() -> str:
-
-    try:
-        result = subprocess.run(
-            ["uv", "init", "--name", "workspace", "--no-workspace"],
-            capture_output=True,
-            text=True,
-            cwd=WORKSPACE,
-            timeout=30,
-        )
-
-        if result.returncode == 0:
-            coder_sms = "uv-проект инициализирован (созданы pyproject.toml и .venv)"
-        
-        elif "Project is already initialized" in f"{result.stdout} | {result.stderr}":
-            coder_sms = "Отлично! uv-проект уже был инициализирован! Продолжаем работать."
-        
-        else:
-            coder_sms = f"Ошибка uv init:\n{result.stdout}{result.stderr}"
-    
-    except Exception as e:
-        coder_sms = f"Ошибка запуска uv init: {e}"
-
-    return coder_sms
-
 def add_dependency(package: str) -> str:
 
     try:
@@ -236,8 +157,7 @@ def run_python(wait: int = 5) -> str:
         output = process.stdout.read()
         
         if not is_alive and process.returncode != 0:
-            summary = extract_error_summary(output)
-            coder_sms = f"❌ Процесс упал с кодом {process.returncode}\nВыжимка по ошибке: {summary}"
+            coder_sms = f"❌ Процесс упал с кодом {process.returncode}\nОшибка: {output}"
 
         else:
             if not output.strip():

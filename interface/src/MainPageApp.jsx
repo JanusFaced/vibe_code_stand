@@ -119,26 +119,33 @@ export default function MainPageApp() {
     return (
         <HeroSection>
             <Container>
-                <AuthorTagline>AI Agent: [ vibe-coding console ]</AuthorTagline>
-
-                <StatusBar>
-                    <StatusDot $online={connected} />
-                    {connected ? "online" : "offline"}
-                    {running.length > 0 && ` · running: ${running.join(", ")}`}
-                </StatusBar>
+                <AuthorTagline>
+                    <StatusBar>
+                        AI Agent: [ vibe-coding console ]
+                        <StatusDot $online={connected} />
+                        {connected ? "online" : "offline"}
+                        {running.length > 0 && ` · running: ${running.join(", ")}`}
+                    </StatusBar>
+                </AuthorTagline>
 
                 <ControlBar>
                     <ControlButton onClick={() => handleControl("/start")}>
-                        ▶️ start project
+                        ▶️ start
                     </ControlButton>
                     <ControlButton onClick={() => handleControl("/stop project")}>
-                        🛑 stop project
+                        🛑 stop
                     </ControlButton>
                     <ControlButton onClick={() => handleControl("/stop vibecoding")}>
-                        🛑 stop vibecoding
+                        🚫 stop coding
                     </ControlButton>
                     <ControlButton onClick={() => handleControl("/status")}>
                         🔍 status
+                    </ControlButton>
+                    <ControlButton onClick={() => handleControl("/save")}>
+                        💾 save
+                    </ControlButton>
+                    <ControlButton onClick={() => handleControl("/back")}>
+                        ↩️ back
                     </ControlButton>
                     <ControlButton onClick={() => handleControl("/projects")}>
                         📜 projects

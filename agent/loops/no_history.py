@@ -10,7 +10,6 @@ from executor import (
     write_file,
     read_file,
     list_files,
-    init_uv,
     add_dependency,
     list_dependencies,
     run_python,
@@ -47,9 +46,6 @@ def call_ollama(
     return response.message.content
 
 def main() -> None:
-
-    init_uv_result = init_uv()
-    print(init_uv_result)
 
     list_project = list_files()
     

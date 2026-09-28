@@ -3,6 +3,7 @@ import asyncpg
 import os
 from pathlib import Path
 import signal
+from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,7 +58,7 @@ async def clear_history():
     async with pool.acquire() as c:
         await c.execute("DELETE FROM messages WHERE session_id = $1", SESSION_ID)
 
-async def switch_folder(folder):
+async def switch_folder(folder: str):
     path = "/workplace"
     os.environ["WORKFOLDER"] = folder
     projects = [name for name in os.listdir(path) if os.path.isdir(os.path.join(path, name))]
@@ -69,6 +70,8 @@ async def switch_folder(folder):
         new_path = f"{path}/{folder}/"
         Path(new_path).mkdir(parents=True, exist_ok=True)
         await save_message("system", f"Новый проект {folder} был создан! Рабочая папка переключена на -> {folder}")
+        await init_uv(folder)
+        await init_git(folder)
 
 async def print_list_of_projects():
     path = "/workplace"
@@ -153,6 +156,88 @@ async def stream(process: asyncio.subprocess.Process, name: str):
     running.pop(name, None)
     await save_message("system", f"Процесс {name} завершён (код {process.returncode})")
 
+# ───────── git base ─────────
+async def _git(
+        *args: str,
+        folder: str,
+        check: bool = True
+    ) -> tuple[int, str, str]:
+    WORKSPACE = f"/workplace/{folder}"
+
+    p = await asyncio.create_subprocess_exec(
+        "git", *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=WORKSPACE,
+    )
+    out, err = await p.communicate()
+    rc = p.returncode
+    stdout = out.decode("utf-8", errors="replace").rstrip()
+    stderr = err.decode("utf-8", errors="replace").rstrip()
+    if check and rc != 0:
+        raise RuntimeError(stderr or stdout or f"git {' '.join(args)} failed")
+    return rc, stdout, stderr
+
+# ───────── git инициализация ─────────
+async def init_git(folder: str):
+
+    await _git("init", folder=folder)
+    await _git("config", "user.email", "agent@vibecoding.local", folder=folder)
+    await _git("config", "user.name", "Vibe Agent", folder=folder)
+    await _git("branch", "-M", "main", folder=folder)
+
+    gi = Path("/workplace") / folder / ".gitignore"
+    gi.write_text(
+        "__pycache__/\n"
+        "*.pyc\n"
+        ".venv/\n"
+        "venv/\n"
+        ".env\n"
+        "*.log\n"
+    )
+
+    await _git("add", "-A", folder=folder)
+    await _git("commit", "-m", "chore: initial commit", folder=folder)
+
+    await save_message("system", f"📦 git инициализирован в {folder}")
+
+# ───────── Запуск сохранения проекта ─────────
+async def git_commit(message: str = ""):
+    folder = os.environ["WORKFOLDER"]
+    msg = message.strip() or f"save {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    await _git("add", "-A", folder=folder)
+    await _git("commit", "-m", msg, folder=folder)
+    await save_message("system", f"📦 {folder} закоммичен под названием {msg}")
+
+# ───────── Запуск отката проекта ─────────
+async def git_rollback():
+    folder = os.environ["WORKFOLDER"]
+    await _git("restore", ".", folder=folder)
+    await _git("clean", "-fd", folder=folder)
+    await save_message("system", f"📦 {folder} откачен до последнего коммита")
+
+# ───────── Запуск инициализации проекта ─────────
+async def init_uv(folder: str):
+    WORKSPACE = f"/workplace/{folder}"
+
+    process = await asyncio.create_subprocess_exec(
+        "uv", "init", "--name", "workspace", "--no-workspace",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=WORKSPACE,
+        start_new_session=True,
+    )
+
+    await process.wait()
+
+    if process.returncode == 0:
+        await save_message("system", f"uv-проект инициализирован в папке {folder}!")
+    
+    elif "Project is already initialized" in f"{process.stdout} | {process.stderr}":
+        await save_message("system", f"Отлично! uv-проект уже был инициализирован в папке {folder}!")
+    
+    else:
+        await save_message("system", f"Ошибка uv init:\n{process.stdout}{process.stderr}")
 
 # ───────── Запуск агента (vibecoding) ─────────
 async def run_vibecoding(task: str):
@@ -170,7 +255,7 @@ async def run_vibecoding(task: str):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=AGENT_DIR,
-            start_new_session=True,      # ← важно для killpg
+            start_new_session=True,
         )
     except Exception as e:
         await save_message("error", f"Не удалось запустить: {e}")
@@ -281,6 +366,12 @@ async def api_command(cmd: CommandIn):
             "system",
             f"running: {running_list if running_list else 'пусто'}",
         )
+
+    elif command == "/save":
+        await git_commit(args)
+
+    elif command == "/back":
+        await git_rollback()
 
     else:
         raise HTTPException(400, f"Неизвестная команда: {command}")
