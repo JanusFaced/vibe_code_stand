@@ -3,7 +3,7 @@ MAX_FILE_READ_SIZE = 32000
 MAX_FILE_WRITE_SIZE = 32000
 MAX_ERROR_SIZE = 250
 
-NAME_MODEL = "qwen3.5:4b"
+NAME_MODEL = "gpt-oss:20b"
 URL_MODEL = "http://ollama:11434"
 
 parametrs_config_master = {
